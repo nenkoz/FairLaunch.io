@@ -6,19 +6,156 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import "./uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import "./uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
+
+// Uniswap V3 interfaces (simplified for this implementation)
+interface INonfungiblePositionManager {
+    struct MintParams {
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    function mint(
+        MintParams calldata params
+    )
+        external
+        payable
+        returns (
+            uint256 tokenId,
+            uint128 liquidity,
+            uint256 amount0,
+            uint256 amount1
+        );
+}
+
+interface IUniswapV3Factory {
+    function createPool(
+        address tokenA,
+        address tokenB,
+        uint24 fee
+    ) external returns (address pool);
+
+    function getPool(
+        address tokenA,
+        address tokenB,
+        uint24 fee
+    ) external view returns (address pool);
+}
+
+interface IUniswapV3Pool {
+    function initialize(uint160 sqrtPriceX96) external;
+}
+
+// Self.xyz Integration Interfaces
+interface ISelfVerificationRoot {
+    struct GenericDiscloseOutputV2 {
+        uint256 nullifier; // Unique passport identifier
+        bytes32 name; // Verified name
+        bytes32 dateOfBirth; // Verified date of birth
+        bytes32 nationality; // Verified nationality
+        bytes32 gender; // Verified gender
+        bytes32 issuingState; // Document issuing country
+        bytes32 passportNumber; // Passport number
+        bytes32 expiryDate; // Document expiration date
+        bool ageVerified; // Age verification result
+        bool ofacCleared; // OFAC compliance result
+        bool countryAllowed; // Geographic restriction result
+        bytes32 commitmentHash; // Cryptographic commitment
+        uint256 timestamp; // Verification timestamp
+    }
+
+    function getConfigId(
+        bytes32 destinationChainId,
+        bytes32 userIdentifier,
+        bytes memory userDefinedData
+    ) external view returns (bytes32);
+}
+
+// Abstract base contract for Self.xyz verification
+abstract contract SelfVerificationBase {
+    /**
+     * @dev Override this function to implement custom verification logic
+     * @param output Verified passport data from Self.xyz
+     * @param userData Contains destinationChainId, userIdentifier, and userDefinedData
+     */
+    function customVerificationHook(
+        ISelfVerificationRoot.GenericDiscloseOutputV2 memory output,
+        bytes memory userData
+    ) internal virtual;
+
+    /**
+     * @dev Override this function to return your configuration ID
+     * @param destinationChainId Chain ID where verification happens
+     * @param userIdentifier User's unique identifier (wallet address)
+     * @param userDefinedData Custom data from frontend
+     */
+    function getConfigId(
+        bytes32 destinationChainId,
+        bytes32 userIdentifier,
+        bytes memory userDefinedData
+    ) public view virtual returns (bytes32) {
+        // Return a default config ID - override in your contract for custom logic
+        return keccak256(abi.encodePacked("default_config"));
+    }
+}
 
 /**
  * @title Giveaway
  * @dev Smart contract for managing token giveaways with Self.xyz passport verification
  * @notice This contract manages USDC deposits, fair distribution, and Self.xyz Sybil resistance
  */
-contract Giveaway is ReentrancyGuard, Ownable {
+contract Giveaway is ReentrancyGuard, Ownable, SelfVerificationRoot {
     using SafeERC20 for IERC20;
 
     // ============ State Variables ============
 
     /// @notice USDC token contract address
     IERC20 public immutable USDC;
+
+    /// @notice Uniswap V2 Router contract address (for liquidity deployment)
+    address public constant UNISWAP_V2_ROUTER =
+        0x0000000000000000000000000000000000000000; // Set actual router address in deployment
+
+    /// @notice Uniswap V2 Factory contract address (for liquidity deployment)
+    address public constant UNISWAP_V2_FACTORY =
+        0x0000000000000000000000000000000000000000; // Set actual factory address in deployment
+
+    /// @notice Uniswap V3 NonfungiblePositionManager contract address
+    // address public constant UNISWAP_V3_POSITION_MANAGER =
+    //     0x3d79EdAaBC0EaB6F08ED885C05Fc0B014290D95A;
+    address public constant UNISWAP_V3_POSITION_MANAGER =
+        0xB00B8C3aB078EB0f7DeC6cE19c1a1da5bf4f8d7e;
+
+    /// @notice Uniswap V3 Factory contract address
+    // address public constant UNISWAP_V3_FACTORY =
+    //     0xAfE208a311B21f13EF87E33A90049fC17A7acDEc;
+    address public constant UNISWAP_V3_FACTORY =
+        0x229Fd76DA9062C1a10eb4193768E192bdEA99572; // testnet
+
+    /// @notice Default fee tier for Uniswap V3 pools (0.3% = 3000)
+    uint24 public constant DEFAULT_V3_FEE_TIER = 3000;
+
+    /// @notice Default lower tick for full-range Uniswap V3 positions
+    int24 public constant DEFAULT_V3_TICK_LOWER = -887272;
+
+    /// @notice Default upper tick for full-range Uniswap V3 positions
+    int24 public constant DEFAULT_V3_TICK_UPPER = 887272;
+
+    /// @notice Standard token decimals (18 decimals is the ERC20 standard)
+    uint8 public constant TOKEN_DECIMALS = 18;
+
+    /// @notice USDC decimals (6 decimals)
+    uint8 public constant USDC_DECIMALS = 6;
 
     /// @notice Platform fee percentage (in basis points, e.g., 250 = 2.5%)
     uint256 public constant PLATFORM_FEE = 250;
@@ -68,6 +205,7 @@ contract Giveaway is ReentrancyGuard, Ownable {
         uint256 liquidityPercentage; // Percentage of tokens for liquidity pool (in basis points, e.g., 3000 = 30%)
         uint256 liquidityTokensClaimed; // Amount of liquidity tokens claimed
         bool liquidityTokensAllocated; // Whether liquidity tokens have been allocated
+        bool liquidityDeployed; // Whether liquidity has been deployed
     }
 
     struct Participant {
@@ -101,6 +239,13 @@ contract Giveaway is ReentrancyGuard, Ownable {
     mapping(uint256 => mapping(uint256 => bool)) public merkleClaimed;
 
     // ============ Events ============
+
+    event LiquidityDeployed(
+        uint256 indexed giveawayId,
+        address indexed poolAddress,
+        uint256 amountToken,
+        uint256 amountUSDC
+    );
 
     event GiveawayCreated(
         uint256 indexed giveawayId,
@@ -201,6 +346,7 @@ contract Giveaway is ReentrancyGuard, Ownable {
     error LiquidityTokensAlreadyClaimed();
     error LiquidityTokensNotAllocated();
     error InvalidAllocationSum();
+    error LiquidityAlreadyDeployed();
 
     // ============ Modifiers ============
 
@@ -239,6 +385,37 @@ contract Giveaway is ReentrancyGuard, Ownable {
         _;
     }
 
+    // ============ Self.xyz settings ============
+
+    // ============ Self.xyz Integration State ============
+
+    bool public verificationSuccessful;
+    ISelfVerificationRoot.GenericDiscloseOutputV2 public lastOutput;
+    bytes public lastUserData;
+    SelfStructs.VerificationConfigV2 public verificationConfig;
+    bytes32 public verificationConfigId;
+    address public lastUserAddress;
+
+    // Events for testing
+    event VerificationCompleted(
+        ISelfVerificationRoot.GenericDiscloseOutputV2 output,
+        bytes userData
+    );
+
+     /**
+     * @notice Constructor for the test contract
+     * @param identityVerificationHubV2Address The address of the Identity Verification Hub V2
+     */
+    constructor(
+        address identityVerificationHubV2Address,
+        uint256 scope,
+        bytes32 _verificationConfigId
+    ) SelfVerificationRoot(identityVerificationHubV2Address, scope) {
+        verificationConfigId = _verificationConfigId;
+    }
+
+    // ============ Self.xyz ends ============
+
     // ============ Constructor ============
 
     constructor(
@@ -252,43 +429,129 @@ contract Giveaway is ReentrancyGuard, Ownable {
     // ============ Self.xyz Integration Functions ============
 
     /**
-     * @notice Register passport verification with Self.xyz data
+     * @dev Implementation of Self.xyz custom verification hook
+     * @param output Verified passport data from Self.xyz
+     * @param userData Contains destinationChainId, userIdentifier, and userDefinedData
+     * @notice This function is automatically called by Self.xyz when user completes verification
+     */
+    function customVerificationHook(
+        ISelfVerificationRoot.GenericDiscloseOutputV2 memory output,
+        bytes memory userData
+    ) internal override {
+        // Extract nullifier from Self.xyz output
+        uint256 nullifier = output.nullifier;
+
+        // Extract user identifier from userData
+        // userData format: [32 bytes destinationChainId][32 bytes userIdentifier][rest: userDefinedData]
+        require(userData.length >= 64, "Invalid userData length");
+
+        bytes32 userIdentifierBytes;
+        assembly {
+            // Skip 32-byte length prefix, then skip 32 bytes (destinationChainId), then read next 32 bytes (userIdentifier)
+            userIdentifierBytes := mload(add(userData, 64))
+        }
+
+        // Convert to address (since we're using wallet address as userId)
+        address userWallet = address(uint160(uint256(userIdentifierBytes)));
+        uint256 userIdentifier = uint256(uint160(userWallet));
+
+        // Call internal verification function
+        _registerPassportVerificationInternal(
+            nullifier,
+            userIdentifier,
+            userWallet
+        );
+    }
+
+    /**
+     * @dev Internal function to register passport verification
      * @param nullifier Self.xyz nullifier (prevents duplicate passport use)
      * @param userIdentifier Self.xyz user identifier
+     * @param wallet User's wallet address
+     */
+    function _registerPassportVerificationInternal(
+        uint256 nullifier,
+        uint256 userIdentifier,
+        address wallet
+    ) internal {
+        // Validate inputs
+        if (nullifier == 0) revert InvalidNullifier();
+        if (userIdentifier == 0) revert InvalidUserIdentifier();
+        if (wallet == address(0)) revert InvalidUserIdentifier();
+
+        // Check for duplicates - but allow re-verification if needed
+        if (
+            _nullifierToUserIdentifier[nullifier] != 0 &&
+            _nullifierToUserIdentifier[nullifier] != userIdentifier
+        ) {
+            revert NullifierAlreadyUsed();
+        }
+        if (
+            _registeredUserIdentifiers[userIdentifier] &&
+            !walletVerified[wallet]
+        ) {
+            revert UserIdentifierAlreadyRegistered();
+        }
+
+        // Register verification (idempotent)
+        _nullifierToUserIdentifier[nullifier] = userIdentifier;
+        _registeredUserIdentifiers[userIdentifier] = true;
+        walletVerified[wallet] = true;
+
+        // Store verification record
+        verifications[wallet] = PassportVerification({
+            nullifier: nullifier,
+            userIdentifier: userIdentifier,
+            wallet: wallet,
+            timestamp: block.timestamp
+        });
+
+        emit PassportVerified(
+            wallet,
+            userIdentifier,
+            nullifier,
+            block.timestamp
+        );
+    }
+
+    /**
+     * @dev Override Self.xyz getConfigId function to return our verification configuration
+     * @param destinationChainId Chain ID where verification happens
+     * @param userIdentifier User's unique identifier (wallet address)
+     * @param userDefinedData Custom data from frontend
+     * @return Configuration ID for this verification request
+     */
+    function getConfigId(
+        bytes32 destinationChainId,
+        bytes32 userIdentifier,
+        bytes memory userDefinedData
+    ) public view override returns (bytes32) {
+        // Return a configuration ID based on our giveaway requirements
+        // This tells Self.xyz what verification rules to apply
+        return
+            keccak256(
+                abi.encodePacked(
+                    "giveaway_verification_v1",
+                    destinationChainId,
+                    address(this)
+                )
+            );
+    }
+
+    /**
+     * @dev Legacy function for manual registration (for testing/migration)
+     * @param nullifier Self.xyz nullifier (prevents duplicate passport use)
+     * @param userIdentifier Self.xyz user identifier
+     * @notice This function will be deprecated once Self.xyz integration is fully deployed
      */
     function registerPassportVerification(
         uint256 nullifier,
         uint256 userIdentifier
     ) external nonReentrant {
-        // Validate inputs
-        if (nullifier == 0) revert InvalidNullifier();
-        if (userIdentifier == 0) revert InvalidUserIdentifier();
-
-        // Check for duplicates
-        if (_nullifierToUserIdentifier[nullifier] != 0)
-            revert NullifierAlreadyUsed();
-        if (_registeredUserIdentifiers[userIdentifier])
-            revert UserIdentifierAlreadyRegistered();
-        if (walletVerified[msg.sender]) revert WalletAlreadyVerified();
-
-        // Register verification
-        _nullifierToUserIdentifier[nullifier] = userIdentifier;
-        _registeredUserIdentifiers[userIdentifier] = true;
-        walletVerified[msg.sender] = true;
-
-        // Store verification record
-        verifications[msg.sender] = PassportVerification({
-            nullifier: nullifier,
-            userIdentifier: userIdentifier,
-            wallet: msg.sender,
-            timestamp: block.timestamp
-        });
-
-        emit PassportVerified(
-            msg.sender,
-            userIdentifier,
+        _registerPassportVerificationInternal(
             nullifier,
-            block.timestamp
+            userIdentifier,
+            msg.sender
         );
     }
 
@@ -362,7 +625,8 @@ contract Giveaway is ReentrancyGuard, Ownable {
             devTokensAllocated: false,
             liquidityPercentage: liquidityPercentage,
             liquidityTokensClaimed: 0,
-            liquidityTokensAllocated: false
+            liquidityTokensAllocated: false,
+            liquidityDeployed: false
         });
 
         emit GiveawayCreated(
@@ -426,6 +690,212 @@ contract Giveaway is ReentrancyGuard, Ownable {
     }
 
     /**
+     * @notice Claim liquidity tokens and automatically deploy to Uniswap V2
+     * @param giveawayId ID of the giveaway
+     * @param usdcAmount Amount of project USDC to use for liquidity pairing
+     */
+    function claimAndDeployLiquidity(
+        uint256 giveawayId,
+        uint256 usdcAmount,
+        uint256 tokenAmount
+    )
+        public
+        nonReentrant
+        validGiveaway(giveawayId)
+        onlyProjectOwner(giveawayId)
+        giveawayFinalized(giveawayId)
+    {
+        // Two steps for adding liquidity:
+        // 1. Calculate the amount of liquidity tokens to add
+        // 2. Add liquidity to Uniswap V2 using the router interface
+
+        GiveawayData storage giveaway = giveaways[giveawayId];
+
+        // Error handling:
+        if (giveaway.liquidityDeployed) revert LiquidityAlreadyDeployed();
+        if (usdcAmount == 0) revert("USDC amount must be greater than zero");
+        if (tokenAmount == 0) revert("Token amount must be greater than zero");
+
+        // Approvals are required before adding liquidity so that the Uniswap V2 router
+        // contract is allowed to transfer the specified amounts of tokens from this contract.
+        // Without these approvals, the router would not be able to move the tokens needed
+        // to create the liquidity pool.
+        IERC20(giveaway.tokenAddress).approve(UNISWAP_V2_ROUTER, tokenAmount);
+        USDC.approve(UNISWAP_V2_ROUTER, usdcAmount);
+
+        // Add liquidity to Uniswap V2 using the router interface
+        (uint256 amountToken, uint256 amountUSDC, ) = IUniswapV2Router02(
+            UNISWAP_V2_ROUTER
+        ).addLiquidity(
+                giveaway.tokenAddress, // Token A (project token)
+                address(USDC), // Token B (USDC)
+                tokenAmount, // Amount of token A
+                usdcAmount, // Amount of token B
+                (tokenAmount * 95) / 100, // Minimum amount of token A (5% slippage)
+                (usdcAmount * 95) / 100, // Minimum amount of token B (5% slippage)
+                address(0), // LP tokens recipient (burned)
+                block.timestamp + 300 // Deadline (5 minutes from now)
+            );
+
+        // Get pool address for reference
+        address poolAddress = IUniswapV2Factory(UNISWAP_V2_FACTORY).getPair(
+            giveaway.tokenAddress,
+            address(USDC)
+        );
+
+        // Update state
+        giveaway.liquidityDeployed = true;
+
+        emit LiquidityDeployed(
+            giveawayId,
+            poolAddress,
+            amountToken,
+            amountUSDC
+        );
+    }
+
+    /**
+     * @notice Claim liquidity tokens and automatically deploy to Uniswap V3
+     * @param giveawayId ID of the giveaway
+     * @param usdcAmount Amount of project USDC to use for liquidity pairing
+     * @param tokenAmount Amount of project tokens to use for liquidity pairing
+     * @dev Uses default parameters: 0.3% fee tier, full-range position
+     */
+    function claimAndDeployLiquidityUniswapV3(
+        uint256 giveawayId,
+        uint256 usdcAmount,
+        uint256 tokenAmount
+    )
+        private
+        validGiveaway(giveawayId)
+        onlyProjectOwner(giveawayId)
+        giveawayFinalized(giveawayId)
+    {
+        GiveawayData storage giveaway = giveaways[giveawayId];
+
+        // Error handling:
+        if (giveaway.liquidityDeployed) revert LiquidityAlreadyDeployed();
+        if (usdcAmount == 0) revert("USDC amount must be greater than zero");
+        if (tokenAmount == 0) revert("Token amount must be greater than zero");
+
+        // Check that the contract has sufficient USDC balance
+        uint256 contractUsdcBalance = USDC.balanceOf(address(this));
+        if (contractUsdcBalance < usdcAmount) {
+            revert("Insufficient USDC balance in contract");
+        }
+
+        // Calculate sqrtPriceX96 based on the fair launch price
+        // Using the correct formula from Uniswap V3 documentation
+
+        // Determine token order (V3 requires token0 < token1)
+        address token0 = giveaway.tokenAddress < address(USDC)
+            ? giveaway.tokenAddress
+            : address(USDC);
+        address token1 = giveaway.tokenAddress < address(USDC)
+            ? address(USDC)
+            : giveaway.tokenAddress;
+
+        // Calculate the price ratio with proper decimal handling
+        // Price should be in the format: token1_amount / token0_amount
+        uint256 numerator;
+        uint256 denominator;
+
+        if (token0 == giveaway.tokenAddress) {
+            // price = token1/token0 = USDC/token
+            numerator = usdcAmount; // USDC amount (6 decimals)
+            denominator = tokenAmount; // token amount (18 decimals)
+            // Adjust for decimal difference: multiply numerator by 10^(18-6) = 10^12
+            numerator = numerator * (10 ** (TOKEN_DECIMALS - USDC_DECIMALS));
+        } else {
+            // price = token1/token0 = token/USDC
+            numerator = tokenAmount; // token amount (18 decimals)
+            denominator = usdcAmount; // USDC amount (6 decimals)
+            // Adjust for decimal difference: multiply denominator by 10^(18-6) = 10^12
+            denominator =
+                denominator *
+                (10 ** (TOKEN_DECIMALS - USDC_DECIMALS));
+        }
+
+        // Calculate sqrtPriceX96 = sqrt(numerator/denominator) * 2^96
+        // To maintain precision, we calculate: sqrt(numerator * 2^192 / denominator)
+        // But to avoid overflow, we use: sqrt(numerator) * 2^96 / sqrt(denominator)
+        uint256 sqrtNumerator = _sqrt(numerator);
+        uint256 sqrtDenominator = _sqrt(denominator);
+
+        // Scale by 2^96 and divide
+        uint160 sqrtPriceX96 = uint160((sqrtNumerator << 96) / sqrtDenominator);
+        // uint160 sqrtPriceX96 = uint160(_sqrt(1) << 96);
+
+        // Use default parameters
+        uint24 feeTier = DEFAULT_V3_FEE_TIER;
+        int24 tickLower = DEFAULT_V3_TICK_LOWER;
+        int24 tickUpper = DEFAULT_V3_TICK_UPPER;
+
+        uint256 amount0Desired = token0 == giveaway.tokenAddress
+            ? tokenAmount
+            : usdcAmount;
+        uint256 amount1Desired = token1 == giveaway.tokenAddress
+            ? tokenAmount
+            : usdcAmount;
+
+        // Check if pool exists, create if it doesn't
+        address poolAddress = IUniswapV3Factory(UNISWAP_V3_FACTORY).getPool(
+            token0,
+            token1,
+            feeTier
+        );
+
+        if (poolAddress == address(0)) {
+            // Create new pool
+            poolAddress = IUniswapV3Factory(UNISWAP_V3_FACTORY).createPool(
+                token0,
+                token1,
+                feeTier
+            );
+
+            // Initialize the pool with the specified price
+            IUniswapV3Pool(poolAddress).initialize(sqrtPriceX96);
+        }
+
+        // Approve the position manager to spend our tokens
+        IERC20(giveaway.tokenAddress).approve(
+            UNISWAP_V3_POSITION_MANAGER,
+            tokenAmount
+        );
+        USDC.approve(UNISWAP_V3_POSITION_MANAGER, usdcAmount);
+
+        // Mint the liquidity position
+        INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager
+            .MintParams({
+                token0: token0,
+                token1: token1,
+                fee: feeTier,
+                tickLower: tickLower,
+                tickUpper: tickUpper,
+                amount0Desired: amount0Desired,
+                amount1Desired: amount1Desired,
+                amount0Min: (amount0Desired * 95) / 100, // 5% slippage tolerance
+                amount1Min: (amount1Desired * 95) / 100, // 5% slippage tolerance
+                recipient: address(0), // Burn the NFT position (permanent liquidity)
+                deadline: block.timestamp + 300 // 5 minutes from now
+            });
+
+        (, , uint256 amount0, uint256 amount1) = INonfungiblePositionManager(
+            UNISWAP_V3_POSITION_MANAGER
+        ).mint(params);
+
+        // Update state
+        giveaway.liquidityDeployed = true;
+
+        emit LiquidityDeployed(
+            giveawayId,
+            poolAddress,
+            token0 == giveaway.tokenAddress ? amount0 : amount1,
+            token0 == address(USDC) ? amount0 : amount1
+        );
+    }
+
+    /**
      * @notice Finalize a giveaway after the end time
      * @param giveawayId ID of the giveaway to finalize
      */
@@ -452,17 +922,15 @@ contract Giveaway is ReentrancyGuard, Ownable {
             : giveaway.totalDeposited;
 
         uint256 platformFee = (finalAllocation * PLATFORM_FEE) / 10000;
-        uint256 projectProceeds = finalAllocation - platformFee;
+        // uint256 projectProceeds = finalAllocation - platformFee;
 
         // Transfer platform fee using SafeERC20
         if (platformFee > 0) {
             USDC.safeTransfer(platformFeeRecipient, platformFee);
         }
 
-        // Transfer project proceeds using SafeERC20
-        if (projectProceeds > 0) {
-            USDC.safeTransfer(giveaway.projectOwner, projectProceeds);
-        }
+        // Calculate remaining USDC for liquidity deployment
+        uint256 remainingUSDC = finalAllocation - platformFee;
 
         // Allocate dev tokens if devPercentage > 0
         uint256 devTokensAllocated = 0;
@@ -487,6 +955,12 @@ contract Giveaway is ReentrancyGuard, Ownable {
             giveaway.totalDeposited,
             giveaway.participantCount,
             devTokensAllocated,
+            liquidityTokensAllocated
+        );
+
+        claimAndDeployLiquidityUniswapV3(
+            giveawayId,
+            remainingUSDC,
             liquidityTokensAllocated
         );
     }
@@ -1117,5 +1591,26 @@ contract Giveaway is ReentrancyGuard, Ownable {
         }
 
         return (true, 0); // Valid
+    }
+
+    // ============ Internal Helper Functions ============
+
+    /**
+     * @notice Calculate integer square root using Babylonian method
+     * @param x Input value
+     * @return result Square root of x
+     */
+    function _sqrt(uint256 x) internal pure returns (uint256 result) {
+        if (x == 0) return 0;
+
+        // Initial guess
+        result = x;
+        uint256 k = (x >> 1) + 1;
+
+        // Babylonian method
+        while (k < result) {
+            result = k;
+            k = (x / k + k) >> 1;
+        }
     }
 }
