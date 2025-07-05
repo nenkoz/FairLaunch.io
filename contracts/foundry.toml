@@ -1,0 +1,34 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.20"
+optimizer = true
+optimizer_runs = 1000
+# solves the issue: Compiler error (/Users/eop/dev/paradigm/solidity/libsolidity/codegen/LValue.cpp:56):Stack too deep.
+via_ir = true
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "@openzeppelin/=lib/openzeppelin-contracts/",
+    "openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "@uniswap/v2-core/=src/uniswap/v2-core/",
+    "@uniswap/v2-periphery/=src/uniswap/v2-periphery/",
+    "v2-core/=src/uniswap/v2-core/contracts/",
+    "v2-periphery/=src/uniswap/v2-periphery/contracts/"
+]
+
+allow_paths = ["./lib", "./src"]
+
+[profile.default.model_checker]
+contracts = { 'lib/v2-core/contracts/' = ["0.5.16"], 'lib/v2-periphery/contracts/' = ["0.6.6"] }
+
+# CELO Network Configuration
+[rpc_endpoints]
+celo = "https://forno.celo.org"
+celo_alfajores = "https://alfajores-forno.celo-testnet.org"
+
+[etherscan]
+celo = { key = "${CELOSCAN_API_KEY}" }
+alfajores = { key = "${CELOSCAN_API_KEY}", url = "https://api-alfajores.celoscan.io/api" }
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
