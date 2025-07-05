@@ -1,0 +1,26 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/contracts/broadcast
+/contracts/broadcast/*/31337/
+/contracts/broadcast/**/dry-run/
+
+node_modules
+
+# Docs
+docs/
+
+.next
+
+# Dotenv file
+.env
+
+.Ds_store
+
+mylunch
+nft_ex
+slug_exp.txt
+__web
+web/.react-router/ 
