@@ -33,7 +33,7 @@ export async function getProjectBySlug(slug: string): Promise<Project | null> {
 
     const data = await redis.hgetall(`project_${slug}`);
     const pj: Project = { id: slug, ...data };
-    return Object.keys(data).length ? pj : null;
+    return pj;
 }
 
 export default redis;

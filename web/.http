@@ -1,0 +1,24 @@
+POST http://localhost:4444/api/launch
+Content-Type: application/json
+
+{
+    "name": "SOLIC",
+    "symbol": "SOL",
+    "description": "This is a test coin for demonstration purposes",
+    "initialSupply": "1000000",
+    "maxSupply": "10000000",
+    "startTime": "2024-12-20T10:00:00",
+    "endTime": "2024-12-21T10:00:00",
+    "maxAllocation": "50000",
+    "tokensForGiveaway": "100000",
+    "devPercentage": 1000,
+    "liquidityPercentage": 2000,
+    "enableTradingImmediately": true,
+    "creatorAddress": "0xFf6e2c6bE2D3599f263e63ab0b9d08D3ef1d77A9"
+}
+
+### Get all projects
+GET http://localhost:4444/api/user/projects
+
+### Get a specific project
+GET http://localhost:4444/api/user/projects/SOL

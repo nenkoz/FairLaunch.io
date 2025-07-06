@@ -48,9 +48,11 @@ contract DeployComplete is Script {
         // Deploy TokenFactory
         TokenFactory tokenFactory = new TokenFactory(platformFeeRecipient);
         console.log("TokenFactory deployed at:", address(tokenFactory));
-
-        // Deploy Giveaway contract
-        Giveaway giveaway = new Giveaway(usdc, platformFeeRecipient);
+        
+        Giveaway giveaway = new Giveaway(
+            usdc, 
+            platformFeeRecipient
+        );
         console.log("Giveaway deployed at:", address(giveaway));
 
         // Deploy LaunchPlatform (orchestrator)
@@ -63,6 +65,20 @@ contract DeployComplete is Script {
 
         vm.stopBroadcast();
 
+        // TODO: Save deployment info to JSON file for compatibility with existing scripts
+        // string memory deploymentInfo = vm.toString(abi.encodePacked(
+        //     '{"contractAddress":"', vm.toString(address(giveaway)), '",',
+        //     '"tokenFactoryAddress":"', vm.toString(address(tokenFactory)), '",',
+        //     '"launchPlatformAddress":"', vm.toString(address(launchPlatform)), '",',
+        //     '"deployer":"', vm.toString(deployer), '",',
+        //     '"platformFeeRecipient":"', vm.toString(platformFeeRecipient), '",',
+        //     '"usdcAddress":"', vm.toString(usdc), '",',
+        //     '"network":"', vm.toString(block.chainid), '",',
+        //     '"deploymentTime":"', vm.toString(block.timestamp), '"}'
+        // ));
+        
+        // vm.writeFile("./deployments/latest.json", deploymentInfo);
+
         // Log deployment summary
         console.log("\n=== Deployment Summary ===");
         console.log("TokenFactory:", address(tokenFactory));
@@ -70,6 +86,7 @@ contract DeployComplete is Script {
         console.log("LaunchPlatform:", address(launchPlatform));
         console.log("Platform Fee Recipient:", platformFeeRecipient);
         console.log("USDC Address:", usdc);
+        console.log("Deployment info saved to: ./deployments/latest.json");
 
         // Verify contracts are working
         console.log("\n=== Contract Verification ===");

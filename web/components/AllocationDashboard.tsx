@@ -166,7 +166,7 @@ export function AllocationDashboard({ giveawayId }: AllocationDashboardProps) {
 
     return (
         <div className="space-y-6 p-6 bg-white rounded-lg border">
-            <h3 className="text-xl font-bold">🏆 Professional Allocation Dashboard</h3>
+            <h3 className="text-xl font-bold">🏆 Allocation Dashboard</h3>
 
             {/* Allocation Overview */}
             <div className="grid grid-cols-3 gap-4">

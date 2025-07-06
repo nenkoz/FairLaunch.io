@@ -49,16 +49,26 @@ export const isUserVerified = (address: string): boolean => {
 };
 
 export interface Project {
-    id: string;
-    address?: string;
-    name?: string;
-    description?: string;
-    ticker?: string;
-    price?: number;
-    creatorAddress?: string;
-    createdAt?: string;
-    claimedFees?: string;
-    unclaimedFees?: string;
-    image?: string;
-    status?: "ACTIVE" | string;
+    id?: string;
+    name: string;
+    symbol: string;
+    description: string;
+    initialSupply: string;
+    maxSupply: string;
+    startTime: string;
+    endTime: string;
+    maxAllocation: string;
+    tokensForGiveaway: string;
+    devPercentage: number; // NEW: Developer allocation (0-5000 basis points)
+    liquidityPercentage: number; // NEW: Liquidity allocation (2000-5000 basis points)
+    enableTradingImmediately: boolean;
+    creatorAddress: string;
+    createdAt: string;
+    status: string;
+}
+
+export function formatDatetimeLocal(date: Date) {
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - offset * 60 * 1000);
+    return localDate.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:MM"
 }

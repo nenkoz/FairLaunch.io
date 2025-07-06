@@ -1,10 +1,11 @@
 import { ethers } from "ethers";
 import { NextApiRequest, NextApiResponse } from "next";
-import { CONTRACTS, FEES, } from "@/config/contracts";
+import { CONTRACTS, FEES } from "@/config/contracts";
 import { AllocationValidator } from "@/utils/allocationValidation";
 import redis from "@/lib/redis";
 
 interface LaunchProjectRequest {
+    hash: string;
     name: string;
     symbol: string;
     description: string;
@@ -18,6 +19,7 @@ interface LaunchProjectRequest {
     liquidityPercentage: number; // NEW: Liquidity allocation (2000-5000 basis points)
     enableTradingImmediately: boolean;
     creatorAddress: string;
+    tokenAddress: string;
 }
 
 interface LaunchProjectResponse {
@@ -47,8 +49,13 @@ interface LaunchProjectResponse {
 }
 
 export default async function launchProject(req: NextApiRequest, res: NextApiResponse<LaunchProjectResponse>) {
+    if (req.method !== "POST") {
+        return res.status(405).json({ success: false, error: "Method not allowed" });
+    }
+
     try {
         const {
+            hash,
             name,
             symbol,
             description,
@@ -62,17 +69,19 @@ export default async function launchProject(req: NextApiRequest, res: NextApiRes
             liquidityPercentage, // NEW: Liquidity allocation (2000-5000 basis points)
             enableTradingImmediately,
             creatorAddress,
+            tokenAddress,
         } = req.body as LaunchProjectRequest;
 
-     
-        const tickerDt = await redis.sismember(`project_tickers`, symbol);
-        if (tickerDt) {
-            return res.status(400).json({success: false, error: " ticker already exists" });
+        // Validate required fields
+        if (!name || !symbol || !description || !creatorAddress) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing required fields: name, symbol, description, creatorAddress",
+            });
         }
 
-        // 1. Validate professional allocation parameters
+        // Validate allocation parameters
         const validation = AllocationValidator.validateAllocation(devPercentage, liquidityPercentage);
-
         if (!validation.isValid) {
             return res.status(400).json({
                 success: false,
@@ -81,65 +90,49 @@ export default async function launchProject(req: NextApiRequest, res: NextApiRes
             });
         }
 
-        // 2. Setup contracts
-        const provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL!);
-        const wallet = new ethers.Wallet(process.env.DEPLOYER_PRIVATE_KEY!, provider);
-
-        const launchPlatform = new ethers.Contract(CONTRACTS.LAUNCH_PLATFORM.address, CONTRACTS.LAUNCH_PLATFORM.abi, wallet);
-
-        // 3. Prepare parameters with professional allocations
-        const tokenParams = {
-            name,
-            symbol,
-            initialSupply: ethers.utils.parseEther(initialSupply),
-            maxSupply: ethers.utils.parseEther(maxSupply),
-            description,
-        };
-
-        const giveawayParams = {
-            startTime: Math.floor(new Date(startTime).getTime() / 1000),
-            endTime: Math.floor(new Date(endTime).getTime() / 1000),
-            maxAllocation: ethers.utils.parseUnits(maxAllocation, 6), // USDC decimals
-            tokensForGiveaway: ethers.utils.parseEther(tokensForGiveaway),
-            devPercentage, // Basis points (e.g., 1000 = 10%)
-            liquidityPercentage, // Basis points (e.g., 2000 = 20%)
-            enableTradingImmediately,
-        };
-
-        // 4. Execute single transaction with professional parameters
-        const tx = await launchPlatform.launchProject(tokenParams, giveawayParams, {
-            value: FEES.TOKEN_CREATION,
-            gasLimit: 2500000, // Increased for allocation features
-        });
-
-        const receipt = await tx.wait();
-
-        // 5. Extract results from events
-        const projectLaunchedEvent = receipt.events?.find((e: any) => e.event === "ProjectLaunched");
-
-        const { launchId, tokenAddress, giveawayId, devPercentage: eventDevPercentage, liquidityPercentage: eventLiquidityPercentage } = projectLaunchedEvent.args;
-
-        // 6. Calculate token breakdown for frontend
-        const tokenBreakdown = AllocationValidator.calculateTokenBreakdown(ethers.utils.parseEther(tokensForGiveaway), devPercentage, liquidityPercentage);
-
-        const launchProjectData = {
-            name,
-            symbol,
-            description,
-            address: tokenAddress,
-            giveawayId: giveawayId.toString(),
-            launchId: launchId.toString(),
-            creatorAddress,
-            devPercentage: devPercentage.toString(),
-            liquidityPercentage: liquidityPercentage.toString(),
-            tokenBreakdown: JSON.stringify(tokenBreakdown),
-            status: "ACTIVE",
-            createdAt: new Date().getTime(),
+        // Check if ticker already exists
+        const tickerExists = await redis.sismember(`project_tickers`, symbol);
+        if (tickerExists) {
+            return res.status(400).json({
+                success: false,
+                error: `Ticker ${symbol} already exists`,
+            });
         }
 
-        console.log("launchProject: saving in redis",launchProjectData)
+        // Calculate token breakdown
+        const tokenBreakdown = AllocationValidator.calculateTokenBreakdown(ethers.utils.parseEther(tokensForGiveaway), devPercentage, liquidityPercentage);
 
-        // 7. Store in database with allocation details
+        console.log("API: Token breakdown calculated:", {
+            devTokens: ethers.utils.formatEther(tokenBreakdown.devTokens),
+            liquidityTokens: ethers.utils.formatEther(tokenBreakdown.liquidityTokens),
+            participantTokens: ethers.utils.formatEther(tokenBreakdown.participantTokens),
+        });
+
+        // Prepare launch project data for storage
+        const launchProjectData = {
+            hash,
+            name,
+            symbol,
+            description,
+            initialSupply,
+            maxSupply,
+            startTime,
+            endTime,
+            maxAllocation,
+            tokensForGiveaway,
+            devPercentage: devPercentage.toString(),
+            liquidityPercentage: liquidityPercentage.toString(),
+            enableTradingImmediately: enableTradingImmediately.toString(),
+            creatorAddress,
+            tokenBreakdown: JSON.stringify({
+                devTokens: ethers.utils.formatEther(tokenBreakdown.devTokens),
+                liquidityTokens: ethers.utils.formatEther(tokenBreakdown.liquidityTokens),
+                participantTokens: ethers.utils.formatEther(tokenBreakdown.participantTokens),
+            }),
+            status: "ACTIVE",
+            createdAt: new Date().getTime(),
+        };
+
         await redis.hset(`project_${symbol.toLowerCase()}`, launchProjectData);
         await redis.sadd("project_tickers", symbol);
         await redis.sadd(`projects_user_${creatorAddress}`, symbol);
@@ -147,10 +140,10 @@ export default async function launchProject(req: NextApiRequest, res: NextApiRes
         res.status(200).json({
             success: true,
             data: {
-                launchId: launchId.toString(),
+                launchId: `launch_${symbol}_${Date.now()}`,
                 tokenAddress,
-                giveawayId: giveawayId.toString(),
-                transactionHash: receipt.transactionHash,
+                giveawayId: "0",
+                transactionHash: hash,
                 allocation: {
                     dev: {
                         percentage: devPercentage / 100,
@@ -168,26 +161,11 @@ export default async function launchProject(req: NextApiRequest, res: NextApiRes
             },
         });
     } catch (error: any) {
-        console.error("Launch failed:", error);
-
-        // Handle specific contract errors
-        if (error.message.includes("InvalidLiquidityPercentage")) {
-            return res.status(400).json({
-                success: false,
-                error: "Minimum 20% liquidity required for professional standards",
-            });
-        }
-
-        if (error.message.includes("InvalidAllocationSum")) {
-            return res.status(400).json({
-                success: false,
-                error: "Combined dev + liquidity allocations cannot exceed 70%",
-            });
-        }
+        console.error("API: Launch failed:", error);
 
         res.status(500).json({
             success: false,
-            error: error.message,
+            error: error.message || "Internal server error",
         });
     }
 }

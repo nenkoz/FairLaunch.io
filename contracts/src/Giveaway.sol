@@ -56,65 +56,14 @@ interface IUniswapV3Pool {
     function initialize(uint160 sqrtPriceX96) external;
 }
 
-// Self.xyz Integration Interfaces
-interface ISelfVerificationRoot {
-    struct GenericDiscloseOutputV2 {
-        uint256 nullifier; // Unique passport identifier
-        bytes32 name; // Verified name
-        bytes32 dateOfBirth; // Verified date of birth
-        bytes32 nationality; // Verified nationality
-        bytes32 gender; // Verified gender
-        bytes32 issuingState; // Document issuing country
-        bytes32 passportNumber; // Passport number
-        bytes32 expiryDate; // Document expiration date
-        bool ageVerified; // Age verification result
-        bool ofacCleared; // OFAC compliance result
-        bool countryAllowed; // Geographic restriction result
-        bytes32 commitmentHash; // Cryptographic commitment
-        uint256 timestamp; // Verification timestamp
-    }
 
-    function getConfigId(
-        bytes32 destinationChainId,
-        bytes32 userIdentifier,
-        bytes memory userDefinedData
-    ) external view returns (bytes32);
-}
-
-// Abstract base contract for Self.xyz verification
-abstract contract SelfVerificationBase {
-    /**
-     * @dev Override this function to implement custom verification logic
-     * @param output Verified passport data from Self.xyz
-     * @param userData Contains destinationChainId, userIdentifier, and userDefinedData
-     */
-    function customVerificationHook(
-        ISelfVerificationRoot.GenericDiscloseOutputV2 memory output,
-        bytes memory userData
-    ) internal virtual;
-
-    /**
-     * @dev Override this function to return your configuration ID
-     * @param destinationChainId Chain ID where verification happens
-     * @param userIdentifier User's unique identifier (wallet address)
-     * @param userDefinedData Custom data from frontend
-     */
-    function getConfigId(
-        bytes32 destinationChainId,
-        bytes32 userIdentifier,
-        bytes memory userDefinedData
-    ) public view virtual returns (bytes32) {
-        // Return a default config ID - override in your contract for custom logic
-        return keccak256(abi.encodePacked("default_config"));
-    }
-}
 
 /**
  * @title Giveaway
  * @dev Smart contract for managing token giveaways with Self.xyz passport verification
  * @notice This contract manages USDC deposits, fair distribution, and Self.xyz Sybil resistance
  */
-contract Giveaway is ReentrancyGuard, Ownable, SelfVerificationRoot {
+contract Giveaway is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
     // ============ State Variables ============
@@ -385,174 +334,17 @@ contract Giveaway is ReentrancyGuard, Ownable, SelfVerificationRoot {
         _;
     }
 
-    // ============ Self.xyz settings ============
-
-    // ============ Self.xyz Integration State ============
-
-    bool public verificationSuccessful;
-    ISelfVerificationRoot.GenericDiscloseOutputV2 public lastOutput;
-    bytes public lastUserData;
-    SelfStructs.VerificationConfigV2 public verificationConfig;
-    bytes32 public verificationConfigId;
-    address public lastUserAddress;
-
-    // Events for testing
-    event VerificationCompleted(
-        ISelfVerificationRoot.GenericDiscloseOutputV2 output,
-        bytes userData
-    );
-
      /**
-     * @notice Constructor for the test contract
-     * @param identityVerificationHubV2Address The address of the Identity Verification Hub V2
+     * @notice Constructor for the Giveaway contract
+     * @param _usdc USDC token contract address
+     * @param _platformFeeRecipient Platform fee recipient address
      */
-    constructor(
-        address identityVerificationHubV2Address,
-        uint256 scope,
-        bytes32 _verificationConfigId
-    ) SelfVerificationRoot(identityVerificationHubV2Address, scope) {
-        verificationConfigId = _verificationConfigId;
-    }
-
-    // ============ Self.xyz ends ============
-
-    // ============ Constructor ============
-
     constructor(
         address _usdc,
         address _platformFeeRecipient
-    ) Ownable(msg.sender) {
+    ) Ownable(msg.sender)  {
         USDC = IERC20(_usdc);
         platformFeeRecipient = _platformFeeRecipient;
-    }
-
-    // ============ Self.xyz Integration Functions ============
-
-    /**
-     * @dev Implementation of Self.xyz custom verification hook
-     * @param output Verified passport data from Self.xyz
-     * @param userData Contains destinationChainId, userIdentifier, and userDefinedData
-     * @notice This function is automatically called by Self.xyz when user completes verification
-     */
-    function customVerificationHook(
-        ISelfVerificationRoot.GenericDiscloseOutputV2 memory output,
-        bytes memory userData
-    ) internal override {
-        // Extract nullifier from Self.xyz output
-        uint256 nullifier = output.nullifier;
-
-        // Extract user identifier from userData
-        // userData format: [32 bytes destinationChainId][32 bytes userIdentifier][rest: userDefinedData]
-        require(userData.length >= 64, "Invalid userData length");
-
-        bytes32 userIdentifierBytes;
-        assembly {
-            // Skip 32-byte length prefix, then skip 32 bytes (destinationChainId), then read next 32 bytes (userIdentifier)
-            userIdentifierBytes := mload(add(userData, 64))
-        }
-
-        // Convert to address (since we're using wallet address as userId)
-        address userWallet = address(uint160(uint256(userIdentifierBytes)));
-        uint256 userIdentifier = uint256(uint160(userWallet));
-
-        // Call internal verification function
-        _registerPassportVerificationInternal(
-            nullifier,
-            userIdentifier,
-            userWallet
-        );
-    }
-
-    /**
-     * @dev Internal function to register passport verification
-     * @param nullifier Self.xyz nullifier (prevents duplicate passport use)
-     * @param userIdentifier Self.xyz user identifier
-     * @param wallet User's wallet address
-     */
-    function _registerPassportVerificationInternal(
-        uint256 nullifier,
-        uint256 userIdentifier,
-        address wallet
-    ) internal {
-        // Validate inputs
-        if (nullifier == 0) revert InvalidNullifier();
-        if (userIdentifier == 0) revert InvalidUserIdentifier();
-        if (wallet == address(0)) revert InvalidUserIdentifier();
-
-        // Check for duplicates - but allow re-verification if needed
-        if (
-            _nullifierToUserIdentifier[nullifier] != 0 &&
-            _nullifierToUserIdentifier[nullifier] != userIdentifier
-        ) {
-            revert NullifierAlreadyUsed();
-        }
-        if (
-            _registeredUserIdentifiers[userIdentifier] &&
-            !walletVerified[wallet]
-        ) {
-            revert UserIdentifierAlreadyRegistered();
-        }
-
-        // Register verification (idempotent)
-        _nullifierToUserIdentifier[nullifier] = userIdentifier;
-        _registeredUserIdentifiers[userIdentifier] = true;
-        walletVerified[wallet] = true;
-
-        // Store verification record
-        verifications[wallet] = PassportVerification({
-            nullifier: nullifier,
-            userIdentifier: userIdentifier,
-            wallet: wallet,
-            timestamp: block.timestamp
-        });
-
-        emit PassportVerified(
-            wallet,
-            userIdentifier,
-            nullifier,
-            block.timestamp
-        );
-    }
-
-    /**
-     * @dev Override Self.xyz getConfigId function to return our verification configuration
-     * @param destinationChainId Chain ID where verification happens
-     * @param userIdentifier User's unique identifier (wallet address)
-     * @param userDefinedData Custom data from frontend
-     * @return Configuration ID for this verification request
-     */
-    function getConfigId(
-        bytes32 destinationChainId,
-        bytes32 userIdentifier,
-        bytes memory userDefinedData
-    ) public view override returns (bytes32) {
-        // Return a configuration ID based on our giveaway requirements
-        // This tells Self.xyz what verification rules to apply
-        return
-            keccak256(
-                abi.encodePacked(
-                    "giveaway_verification_v1",
-                    destinationChainId,
-                    address(this)
-                )
-            );
-    }
-
-    /**
-     * @dev Legacy function for manual registration (for testing/migration)
-     * @param nullifier Self.xyz nullifier (prevents duplicate passport use)
-     * @param userIdentifier Self.xyz user identifier
-     * @notice This function will be deprecated once Self.xyz integration is fully deployed
-     */
-    function registerPassportVerification(
-        uint256 nullifier,
-        uint256 userIdentifier
-    ) external nonReentrant {
-        _registerPassportVerificationInternal(
-            nullifier,
-            userIdentifier,
-            msg.sender
-        );
     }
 
     // ============ External Functions ============

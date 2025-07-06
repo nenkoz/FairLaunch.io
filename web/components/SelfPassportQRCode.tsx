@@ -33,6 +33,10 @@ export default function SelfPassportQRCode() {
         }
 
         displayToast("Wallet connected!");
+        if (localStorage.getItem("passport_verified")) {
+            setIsVerified(true);
+            return;
+        }
 
         // if (isUserVerified(address)) {
         //     setIsVerified(true);
@@ -45,8 +49,8 @@ export default function SelfPassportQRCode() {
                     version: 2,
                     appName: process.env.NEXT_PUBLIC_SELF_APP_NAME,
                     scope: process.env.NEXT_PUBLIC_SELF_SCOPE,
-                    endpoint: process.env.NEXT_PUBLIC_GIVEAWAY_ADDRESS,
-                    logoBase64: "https://i.postimg.cc/mrmVf9hm/self.png",
+                    endpoint: process.env.NEXT_PUBLIC_PASSPORT_ADDRESS,
+                    logoBase64: "https://static.vecteezy.com/system/resources/previews/021/627/718/non_2x/celo-coin-stacks-cryptocurrency-3d-render-illustration-free-png.png",
                     userId: address,
                     endpointType: "staging_celo",
                     userIdType: "hex",
@@ -66,6 +70,7 @@ export default function SelfPassportQRCode() {
         if (address) {
             setVerifiedUser(address);
             setIsVerified(true);
+            localStorage.setItem("passport_verified", "true");
             displayToast("Verification successful! Redirecting...");
             setTimeout(() => {
                 router.push("/launch");

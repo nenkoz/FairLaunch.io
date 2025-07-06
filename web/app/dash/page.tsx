@@ -13,7 +13,7 @@ export default function LaunchFormPage() {
     return (
         <div className="flex flex-col">
             <NavComponent />
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex items-center justify-center pt-12">
                 <AllocationDashboard giveawayId={1} />
             </div>
         </div>

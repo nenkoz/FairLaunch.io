@@ -19,7 +19,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <QueryClientProvider client={queryClient}>
                 <RainbowKitProvider
                     appInfo={{
-                        appName: "Giveaway",
+                        appName: "Fairlaunch",
                     }}
                     modalSize="compact"
                     showRecentTransactions={true}

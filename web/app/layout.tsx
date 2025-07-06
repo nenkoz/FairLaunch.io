@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+// import "@rainbow-me/rainbowkit/dist/index.css";
 import { UserProvider } from "../context/UserContext";
 import { Providers } from "../providers/providers";
+import "@rainbow-me/rainbowkit/styles.css";
 
 const geistSans = localFont({
     src: "./fonts/GeistVF.woff",

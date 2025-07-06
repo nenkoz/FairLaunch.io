@@ -4,11 +4,10 @@ import { useEffect, useState, lazy, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { User, useUser } from "@/context/UserContext";
 import { useAccount, useSignMessage } from "wagmi";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import "../../node_modules/@rainbow-me/rainbowkit/dist/index.css";
+// import "../../node_modules/@rainbow-me/rainbowkit/dist/index.css";
 import { isUserVerified, removeVerifiedUser, setVerifiedUser } from "@/lib/common";
 import NavComponent from "@/components/NavComponent";
-import LaunchForm from "@/components/LaunchForm";
+import ClipLoader from "react-spinners/ClipLoader";
 
 export default function AuthPage() {
     const { status: accountStatus, address, isDisconnected } = useAccount();
@@ -54,9 +53,8 @@ export default function AuthPage() {
             age: 0,
             verified: false,
         });
-        
 
-        router.push("/launch");
+        router.push("/verify");
         (async () => {
             try {
                 const res = await fetch(`/api/user/nonce?address=${address}`);
@@ -121,6 +119,7 @@ export default function AuthPage() {
 
     const logout = () => {
         localStorage.removeItem("userId");
+        localStorage.removeItem("passport_verified");
         setUser(null);
         setName("");
         setStatus("idle");
@@ -133,9 +132,18 @@ export default function AuthPage() {
             <NavComponent />
             <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-yellow-50">
                 <div className="w-full max-w-sm bg-white shadow-lg rounded-2xl p-6 space-y-4">
-                    <h1 className="text-2xl font-bold text-yellow-600"> {isLoading ? `Loading...please wait` : `Connect your wallet to begin`}</h1>
+                    <h1 className="text-2xl font-bold text-yellow-600">
+                        {isLoading ? (
+                            <div className="flex flex-col justify-center items-center py-12">
+                                <ClipLoader color="#facc15" size={48} />
+                                <p className="text-gray-500 text-sm">Please wait...</p>
+                            </div>
+                        ) : (
+                            `Connect your wallet to begin`
+                        )}
+                    </h1>
                 </div>
-                
+
                 {showToast && <div className="fixed bottom-4 right-4 bg-gray-800 text-white py-2 px-4 rounded shadow-lg animate-fade-in text-sm">{toastMessage}</div>}
             </div>
         </>

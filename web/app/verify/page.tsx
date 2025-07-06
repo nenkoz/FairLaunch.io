@@ -11,11 +11,13 @@ export default function VerifyPage() {
     const { user } = useUser();
 
     return (
-        <div className="flex flex-col">
-            <NavComponent />
-            <div className="flex-1 flex items-center justify-center">
-                <SelfPassportQRCode  />
-            </div>
-        </div>
+
+
+<>
+<NavComponent />
+<div className="flex flex-col items-center justify-center min-h-screen p-4 bg-yellow-50">
+<SelfPassportQRCode  />
+</div>
+</>
     );
 }

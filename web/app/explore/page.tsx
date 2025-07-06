@@ -9,9 +9,10 @@ import { Project } from "@/lib/common";
 import ClipLoader from "react-spinners/ClipLoader";
 import DepositModal from "../../components/DepositModal";
 import { useBalance, useAccount } from "wagmi";
+import { Home, Rocket, Wallet, Compass, Settings, Search } from "lucide-react";
 import ProjectComponent from "@/components/ProjectComponent";
 
-export default function ProjectsPage() {
+export default function ExplorePage() {
     const router = useRouter();
     const { user } = useUser();
     const [projects, setProjects] = useState<Project[]>([]);
@@ -21,22 +22,26 @@ export default function ProjectsPage() {
     const [open, setOpen] = useState(false);
 
     const { address, isConnected } = useAccount();
-    const { data, isLoading } = useBalance({
-        address,
-    });
+    // const { data, isLoading } = useBalance({
+    //     address,
+    // });
 
     useEffect(() => {
+
         if (!address) {
-            console.log("no address");
+            console.warn("no wagmi:address ", address);
             setLoading(false);
-            // router.push("/");
             return;
         }
+console.log("wagmi:address ", address);
+     
 
-        const fetchProjects = async () => {
+        (async () => {
             setLoading(true);
-            const res = await fetch("/api/user/projects?address=" + address);
+            try{
+            const res = await fetch("/api/user/projects");
             const data = await res.json();
+            console.log("API:Fetching projects:", data)
             const list: Project[] = Object.values(data).map((p: any) => ({
                 ...p,
                 claimedFees: parseFloat(p.claimedFees || 0),
@@ -49,9 +54,12 @@ export default function ProjectsPage() {
             setClaimed(0);
             setUnclaimed(0);
             setLoading(false);
-        };
+            }catch(e){
+                console.error("Error fetching projects:", e);
+                setLoading(false);
+            }
+        })()
 
-        fetchProjects();
     }, [address]);
 
     const claimStatus = "";
@@ -60,8 +68,8 @@ export default function ProjectsPage() {
         <div className="flex flex-col">
             <NavComponent />
             <div className="flex-1 flex items-center justify-center">
-                <div className="p-6 max-w-4xl mx-auto">
-                    <h1 className="text-2xl font-bold text-yellow-600 mb-4">My projects</h1>
+                <div className="p-6 max-w-4xl mx-auto w-full">
+                    <h1 className="text-2xl font-bold text-yellow-600 mb-4">Explore</h1>
                     {loading && (
                          <div className="flex flex-col justify-center items-center py-12">
                          <ClipLoader color="#facc15" size={48} />
@@ -70,19 +78,20 @@ export default function ProjectsPage() {
                     )}
 
                     {!loading && projects.length === 0 && (
-                        <div className="p-6 text-center">
+                        <div className="p-6 text-center bg-gray-100 rounded-xl">
+                            <Rocket className="w-12 h-12 mx-auto mb-4 text-yellow-500" />
                             <h3 className="text-xl font-semibold text-black mb-2">No Projects</h3>
-                            <p className="text-text-secondary">You haven't launched a project yet.</p>
-                            <button onClick={() => router.push("/launch")} className="w-full bg-yellow-400 text-white py-3 rounded-full font-semibold hover:bg-yellow-600 transition">
-                                Get Started
+                            <p className="text-text-secondary">Creators are still working on their projects.</p>
+                            <button onClick={() => router.push("/launch")} className="w-full bg-yellow-400 text-white py-3 rounded-full font-semibold hover:bg-yellow-600 transition mt-4">
+                                Why not be first?
                             </button>
                         </div>
                     )}
 
-                    {!loading && projects.length > 0 && (
+{!loading && projects.length > 0 && (
                         <div className="grid md:grid-cols-2 gap-6">
                             {projects.map((project) => (
-                                <ProjectComponent key={project.symbol} project={project} onDeposit={() => setOpen(true)} canDeposit={false} />
+                                <ProjectComponent key={project.symbol} project={project} onDeposit={() => setOpen(true)} canDeposit={true} />
                             ))}
                         </div>
                     )}

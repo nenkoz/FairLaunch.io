@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
+import { useWriteContract, useWaitForTransactionReceipt, useAccount } from "wagmi";
 import { parseEther, parseUnits } from "viem";
 import { TransactionReceipt } from "viem";
 import { CONTRACTS } from "@/config/contracts";
@@ -28,6 +28,7 @@ interface UseLaunchProjectReturn {
 }
 
 export function useLaunchProject(): UseLaunchProjectReturn {
+    const { address } = useAccount();
     const [step, setStep] = useState<number>(0);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [isError, setIsError] = useState<any>(null);
@@ -103,18 +104,33 @@ export function useLaunchProject(): UseLaunchProjectReturn {
             };
 
             setStep(2);
-
+const tokenAddress=CONTRACTS.LAUNCH_PLATFORM.address as `0x${string}`
             writeContract({
                 abi: CONTRACTS.LAUNCH_PLATFORM.abi,
-                address: CONTRACTS.LAUNCH_PLATFORM.address as `0x${string}`,
+                address: tokenAddress,
                 functionName: "launchProject",
                 args: [tokenParams, giveawayParams],
                 value: parseEther("0.1"),
             });
+            console.log("Launching project...");
+            console.log("Token params:", tokenParams);
+            console.log("Giveaway params:", giveawayParams);
+            console.log("Hash:", hash);
+
+            const res = await fetch("/api/launch", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                },
+                body: JSON.stringify({ ...formData,hash, tokenAddress, creatorAddress: address }),
+            });
+
+            if (!res.ok) throw new Error("Backend failed");
+            // displayToast("Project submitted successfully! Redirecting...");
         } catch (error) {
             console.error("Launch failed:", error);
             setStep(0);
-            throw error;
         }
     };
 

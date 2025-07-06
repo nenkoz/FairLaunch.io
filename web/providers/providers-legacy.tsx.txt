@@ -1,0 +1,91 @@
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { WagmiProvider } from "wagmi";
+import { celoAlfajores } from "wagmi/chains";
+import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
+
+import { config } from "../wagmi_config";
+
+// Create a stable query client instance
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 60 * 1000, // 1 minute
+            retry: 1,
+        },
+    },
+});
+
+export function Providers({ children }: { children: React.ReactNode }) {
+    const [mounted, setMounted] = useState(false);
+    const [error, setError] = useState<Error | null>(null);
+    
+    useEffect(() => {
+        // Prevent multiple initializations
+        if (mounted) return;
+        
+        try {
+            setMounted(true);
+        } catch (err) {
+            console.error("Failed to initialize providers:", err);
+            setError(err as Error);
+        }
+    }, [mounted]);
+
+    // Memoize the config to prevent re-creation
+    const wagmiConfig = useMemo(() => {
+        try {
+            return config;
+        } catch (err) {
+            console.error("Failed to create wagmi config:", err);
+            setError(err as Error);
+            return null;
+        }
+    }, []);
+
+    if (error) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <h2 className="text-xl font-semibold text-red-600 mb-2">Initialization Error</h2>
+                    <p className="text-gray-600 mb-4">{error.message}</p>
+                    <button 
+                        onClick={() => window.location.reload()} 
+                        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    >
+                        Reload Page
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (!mounted || !wagmiConfig) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Initializing...</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <WagmiProvider config={wagmiConfig}>
+            <QueryClientProvider client={queryClient}>
+                <RainbowKitProvider
+                    appInfo={{
+                        appName: "FairLaunch",
+                    }}
+                    modalSize="compact"
+                    showRecentTransactions={true}
+                    initialChain={celoAlfajores}>
+                    {children}
+                </RainbowKitProvider>
+            </QueryClientProvider>
+        </WagmiProvider>
+    );
+}

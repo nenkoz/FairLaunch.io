@@ -5,7 +5,7 @@ import ChartComponent from "@/components/ChartComponent";
 import ChartButton from "@/components/ChartButton";
 
 export default async function ProjectPage({ params }: { params: { slug: string } }) {
-    const project = await getProjectBySlug(params.slug);
+    const project = await getProjectBySlug(params?.slug?.toLowerCase() || "");
     if (!project) {
         return (
             <div className="flex flex-col">
@@ -47,9 +47,9 @@ export default async function ProjectPage({ params }: { params: { slug: string }
             <div className="max-w-5xl mx-auto p-6">
                 <div className="py-12">
                     <h1 className="text-3xl font-semibold mb-2">
-                        {project.name} (${project.ticker})
+                        {project.name} (${project.symbol})
                     </h1>
-                    <p className="text-xl text-gray-700">${project.price}</p>
+                    <p className="text-xl text-gray-700">${project.initialSupply}</p>
                     <div className="h-56 my-4">
                         <ChartComponent data={data} />
                     </div>
@@ -102,9 +102,9 @@ export default async function ProjectPage({ params }: { params: { slug: string }
                             6.05K
                         </div>
                     </div>
-                    <button type="submit" className="w-full bg-yellow-400 text-white py-3 rounded-full font-semibold hover:bg-yellow-600 transition" disabled={status === "loading"}>
+                    {/* <button type="submit" className="w-full bg-yellow-400 text-white py-3 rounded-full font-semibold hover:bg-yellow-600 transition" disabled={status === "loading"}>
                         {status === "loading" ? "Loading..." : "Buy"}
-                    </button>
+                    </button> */}
                 </div>
             </div>
         </>
